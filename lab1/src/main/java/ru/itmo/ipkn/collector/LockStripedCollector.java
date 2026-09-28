@@ -41,9 +41,9 @@ public class LockStripedCollector implements MetricsCollector {
 
     @Override
     public void record(long value) {
-        /*if (value < 0) {
+        if (value < 0) {
             throw new IllegalArgumentException("Value should be non-negative");
-        }*/
+        }
         int bucket = (int) Math.min(value / bucketSize, buckets.length - 1);
 
         bucketLocks[bucket % bucketLocks.length].lock();
@@ -66,9 +66,9 @@ public class LockStripedCollector implements MetricsCollector {
 
     @Override
     public Snapshot snapshot() {
-        /*if (count.get() == 0) {
+        if (count.get() == 0) {
             return new Snapshot(buckets.clone(), 0, 0, 0, 0, 0, 0);
-        }*/
+        }
 
         long[] bucketsCopy = new long[buckets.length];
         for (int i = 0; i < bucketLocks.length; ++i) {
