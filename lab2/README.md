@@ -640,7 +640,7 @@ mode=volatile samples=2,000,000
 - Процессор (модель, число физических и логических ядер): `AMD Ryzen 5 5600H 6/12`
 - Операционная система и версия ядра: `Windows 11 25H2 26200.9711`
 - Версия компилятора / JDK: `Java 25 (Temurin OpenJDK)`
-- Этапы 1–2: вывод `withdraw-v0 first`, `withdraw-v1 first`, `transfer replay AB` совпал с методичкой (да / нет): `...`
+- Этапы 1–2: вывод `withdraw-v0 first`, `withdraw-v1 first`, `transfer replay AB` совпал с методичкой (да / нет): `да`
 
 ### 2. Результаты этапов 0–5
 

@@ -14,20 +14,38 @@ public final class Strategies {
      * Всегда первый поток из enabled.
      */
     public static final class FirstAlive implements Strategy {
+
         public int pick(List<Integer> enabled, int last) {
             return enabled.getFirst();
         }
     }
 
-    /** Проигрывает трассу: на i-м решении выбирает поток trace[i] ('A' -> 0, 'B' -> 1). */
+    /**
+     * Проигрывает трассу: на i-м решении выбирает поток trace[i] ('A' -> 0, 'B' -> 1).
+     */
     public static final class Replay implements Strategy {
-        public Replay(String trace) { }
 
-        /** Сбросить позицию в трассе перед прогоном. */
-        public void beginRun() { }
+        private final String trace;
+        private int pos;
+
+        public Replay(String trace) {
+            this.trace = trace;
+            pos = 0;
+        }
+
+        /**
+         * Сбросить позицию в трассе перед прогоном.
+         */
+        public void beginRun() {
+            pos = 0;
+        }
 
         public int pick(List<Integer> enabled, int last) {
-            throw new UnsupportedOperationException("TODO этап 2: Replay.pick");
+            if (pos < trace.length()) {
+                return trace.charAt(pos++) - 'A';
+            } else {
+                throw new RuntimeException("Replay trace has ended");
+            }
         }
     }
 
