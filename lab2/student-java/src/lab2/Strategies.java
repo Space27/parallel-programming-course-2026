@@ -6,12 +6,16 @@ import java.util.List;
  * FirstAlive — этап 1, Replay — этап 2, RandomPick — этап 3, Dfs — этап 4 (ограничение bound — этап 5).
  * enabled — номера потоков, которые могут сделать шаг, по возрастанию; last — прошлый выбранный (-1 в начале). */
 public final class Strategies {
-    private Strategies() { }
 
-    /** Всегда первый поток из enabled. */
+    private Strategies() {
+    }
+
+    /**
+     * Всегда первый поток из enabled.
+     */
     public static final class FirstAlive implements Strategy {
         public int pick(List<Integer> enabled, int last) {
-            throw new UnsupportedOperationException("TODO этап 1: FirstAlive.pick");
+            return enabled.getFirst();
         }
     }
 
