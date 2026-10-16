@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
 /* Этап 1: планировщик, который ведёт настоящие потоки строго по одному (передача хода через семафоры).
  * Этап 2: обнаружение deadlock в главном цикле и корректное завершение застрявших потоков.
@@ -27,6 +28,9 @@ public final class Scheduler {
     private static final ThreadLocal<ThreadInfo> local = new ThreadLocal<>();
     private final StringBuilder trace = new StringBuilder();
 
+    private final List<SchedLock> locks = new ArrayList<>();
+    private boolean aborted;
+
     public Scheduler() {
     }
 
@@ -42,8 +46,9 @@ public final class Scheduler {
             local.set(me);
             try {
                 body.run();
+            } catch (AbortedError _) {
             } finally {
-                me.setStatus(ThreadStatus.FINISHED);
+                me.status = ThreadStatus.FINISHED;
                 schedSemaphore.release();
             }
         });
@@ -56,30 +61,53 @@ public final class Scheduler {
      */
     public void run(Strategy strategy) {
         for (ThreadInfo thread : threads) {
-            thread.thread().start();
+            thread.thread.start();
             schedSemaphore.acquireUninterruptibly();
         }
         int last = -1;
-        List<ThreadInfo> enabled;
-        while (true) {
-            enabled = threads.stream().filter(this::isEnabled).toList();
-            if (enabled.isEmpty()) {
-                break;
+        try {
+            while (true) {
+                List<ThreadInfo> enabled = threads.stream().filter(this::isEnabled).toList();
+                if (enabled.isEmpty()) {
+                    checkDeadlock();
+                    break;
+                }
+                int id = strategy.pick(enabled.stream().map(t -> t.id).toList(), last);
+                if (id < 0 || id >= threads.size() || !isEnabled(threads.get(id))) {
+                    throw new RuntimeException("Invalid thread id=" + id + " from strategy");
+                }
+                last = id;
+                trace.append((char) ('A' + id));
+                ThreadInfo currentThread = threads.get(id);
+                currentThread.status = ThreadStatus.RUNNING;
+                currentThread.semaphore.release();
+                schedSemaphore.acquireUninterruptibly();
             }
-            int id = strategy.pick(enabled.stream().map(ThreadInfo::id).toList(), last);
-            last = id;
-            trace.append((char) ('A' + id));
-            ThreadInfo currentThread = threads.get(id);
-            currentThread.setStatus(ThreadStatus.RUNNING);
-            currentThread.semaphore().release();
-            schedSemaphore.acquireUninterruptibly();
+        } finally {
+            abortAndJoin();
         }
+    }
+
+    private void abortAndJoin() {
+        aborted = true;
+        threads.forEach(t -> t.semaphore.release());
+
         for (ThreadInfo thread : threads) {
             try {
-                thread.thread().join();
+                thread.thread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+        }
+    }
+
+    private void checkDeadlock() {
+        if (threads.stream().anyMatch(t -> t.status != ThreadStatus.FINISHED)) {
+            deadlock = "held={" +
+                    locks.stream().filter(lock -> lock.owner != -1)
+                            .map(lock -> lock.name + ":" + (char) (lock.owner + 'A'))
+                            .collect(Collectors.joining(", ")) +
+                    "}";
         }
     }
 
@@ -104,45 +132,75 @@ public final class Scheduler {
     public static void await(BooleanSupplier cond) {
         ThreadInfo me = local.get();
 
-        if (me.touched() || !cond.getAsBoolean()) {
-            me.setStatus(ThreadStatus.WAITING);
-            me.setWaitingFor(cond);
-            me.scheduler().schedSemaphore.release();
-            me.semaphore().acquireUninterruptibly();
+        if (me.touched || !cond.getAsBoolean()) {
+            me.status = ThreadStatus.WAITING;
+            me.waitingFor = cond;
+            pass(me);
 
-            me.setWaitingFor(null);
+            me.waitingFor = null;
         }
 
         log("await done");
         touch();
     }
 
+    private static void pass(ThreadInfo me) {
+        Scheduler s = me.scheduler;
+        if (s.aborted) throw new AbortedError();
+        s.schedSemaphore.release();
+        me.semaphore.acquireUninterruptibly();
+        if (s.aborted) throw new AbortedError();
+    }
+
+    static void blockOn(SchedLock l) {
+        ThreadInfo me = local.get();
+        if (me.touched || l.owner != -1) {
+            me.status = ThreadStatus.BLOCKED;
+            me.blockedOn = l;
+            pass(me);
+
+            me.blockedOn = null;
+        }
+    }
+
+    static boolean aborted() {
+        return local.get().scheduler.aborted;
+    }
+
+    static int currentId() {
+        return local.get().id;
+    }
+
+    public void register(SchedLock l) {
+        locks.add(l);
+    }
+
     private boolean isEnabled(ThreadInfo thread) {
-        return switch (thread.status()) {
+        return switch (thread.status) {
             case READY -> true;
-            case WAITING -> thread.waitingFor().getAsBoolean();
+            case WAITING -> thread.waitingFor.getAsBoolean();
+            case BLOCKED -> thread.blockedOn.owner == -1;
             default -> false;
         };
     }
 
-    public static void pause() {
+    static void pause() {
         ThreadInfo me = local.get();
-        if (me.touched()) {
-            me.setTouched(false);
-            me.setStatus(ThreadStatus.READY);
-            me.scheduler().schedSemaphore.release();
-            me.semaphore().acquireUninterruptibly();
+        if (me.touched) {
+            me.touched = false;
+            me.status = ThreadStatus.READY;
+            pass(me);
         }
     }
 
-    public static void touch() {
-        local.get().setTouched(true);
+    static void touch() {
+        local.get().touched = true;
     }
 
-    public static void log(String message) {
+    static void log(String message) {
         ThreadInfo me = local.get();
-        if (me.scheduler().logging) {
-            me.scheduler().log.add(String.format("%c  %s", (char) ('A' + me.id), message));
+        if (me.scheduler.logging && !me.scheduler.aborted) {
+            me.scheduler.log.add(String.format("%c  %s", (char) ('A' + me.id), message));
         }
     }
 
@@ -150,6 +208,7 @@ public final class Scheduler {
         RUNNING,
         READY,
         WAITING,
+        BLOCKED,
         FINISHED
     }
 
@@ -162,6 +221,7 @@ public final class Scheduler {
         private ThreadStatus status;
         private boolean touched;
         private BooleanSupplier waitingFor;
+        private SchedLock blockedOn;
 
         ThreadInfo(
                 int id, Scheduler scheduler,
@@ -181,45 +241,11 @@ public final class Scheduler {
         ThreadInfo(int id, Thread thread, Semaphore semaphore, Scheduler scheduler) {
             this(id, scheduler, thread, semaphore, ThreadStatus.READY, true);
         }
+    }
 
-        public int id() {
-            return id;
-        }
-
-        public Thread thread() {
-            return thread;
-        }
-
-        public ThreadStatus status() {
-            return status;
-        }
-
-        public Semaphore semaphore() {
-            return semaphore;
-        }
-
-        public Scheduler scheduler() {
-            return scheduler;
-        }
-
-        public boolean touched() {
-            return touched;
-        }
-
-        public BooleanSupplier waitingFor() {
-            return waitingFor;
-        }
-
-        public void setStatus(ThreadStatus status) {
-            this.status = status;
-        }
-
-        public void setTouched(boolean touched) {
-            this.touched = touched;
-        }
-
-        public void setWaitingFor(BooleanSupplier waitingFor) {
-            this.waitingFor = waitingFor;
+    private static final class AbortedError extends Error {
+        AbortedError() {
+            super(null, null, false, false);
         }
     }
 }
