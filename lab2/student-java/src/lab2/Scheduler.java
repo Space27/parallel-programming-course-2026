@@ -64,7 +64,7 @@ public final class Scheduler {
             thread.thread.start();
             schedSemaphore.acquireUninterruptibly();
         }
-        int last = -1;
+        int id = -1;
         try {
             while (true) {
                 List<ThreadInfo> enabled = threads.stream().filter(this::isEnabled).toList();
@@ -72,11 +72,10 @@ public final class Scheduler {
                     checkDeadlock();
                     break;
                 }
-                int id = strategy.pick(enabled.stream().map(t -> t.id).toList(), last);
+                id = strategy.pick(enabled.stream().map(t -> t.id).toList(), id);
                 if (id < 0 || id >= threads.size() || !isEnabled(threads.get(id))) {
                     throw new RuntimeException("Invalid thread id=" + id + " from strategy");
                 }
-                last = id;
                 trace.append((char) ('A' + id));
                 ThreadInfo currentThread = threads.get(id);
                 currentThread.status = ThreadStatus.RUNNING;

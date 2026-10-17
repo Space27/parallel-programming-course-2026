@@ -1,5 +1,6 @@
 package lab2;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
@@ -66,21 +67,59 @@ public final class Strategies {
         }
     }
 
-    /** Stateless DFS по дереву выборов: каждый прогон с нуля, повторяет префикс прошлого и берёт следующий вариант.
-     *  bound — максимум вытеснений (этап 5); для dfs runner передаёт Integer.MAX_VALUE. */
+    /**
+     * Stateless DFS по дереву выборов: каждый прогон с нуля, повторяет префикс прошлого и берёт следующий вариант.
+     * bound — максимум вытеснений (этап 5); для dfs runner передаёт Integer.MAX_VALUE.
+     */
     public static final class Dfs implements Strategy {
-        public Dfs(int bound) { }
 
-        /** Подготовиться к новому прогону (позиция в пути, счётчик вытеснений). */
-        public void beginRun() { }
+        private final List<Integer> decisions;
+        private final int bound;
+        private int remainingPreempt;
+        private int pos;
 
-        public int pick(List<Integer> enabled, int last) {
-            throw new UnsupportedOperationException("TODO этап 4: Dfs.pick");
+        public Dfs(int bound) {
+            this.decisions = new ArrayList<>();
+            this.bound = bound;
         }
 
-        /** Выбрать следующий путь; false — дерево обойдено. */
+        /**
+         * Подготовиться к новому прогону (позиция в пути, счётчик вытеснений).
+         */
+        public void beginRun() {
+            pos = 0;
+            remainingPreempt = bound;
+        }
+
+        public int pick(List<Integer> enabled, int last) {
+            boolean canContinue = last != -1 && enabled.contains(last);
+            List<Integer> options = (canContinue && remainingPreempt == 0) ? List.of(last) : enabled;
+
+            int index = pos < decisions.size() ? options.size() - 1 - decisions.get(pos) : 0;
+            if (pos++ >= decisions.size()) {
+                decisions.add(options.size() - 1);
+            }
+            int cur = options.get(index);
+            if (canContinue && cur != last) {
+                --remainingPreempt;
+            }
+
+            return cur;
+        }
+
+        /**
+         * Выбрать следующий путь; false — дерево обойдено.
+         */
         public boolean endRun() {
-            throw new UnsupportedOperationException("TODO этап 4: Dfs.endRun");
+            for (int i = decisions.size() - 1; i >= 0 && decisions.get(i) == 0; --i) {
+                decisions.remove(i);
+            }
+            if (decisions.isEmpty()) {
+                return false;
+            } else {
+                decisions.set(decisions.size() - 1, decisions.getLast() - 1);
+                return true;
+            }
         }
     }
 }
